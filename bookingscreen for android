@@ -1,0 +1,1671 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:intl/intl.dart';import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+//import 'package:js/js.dart';
+//import 'package:universal_html/html.dart' as html;
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:juclean/js_interop/MobilePlaces.dart';
+import 'package:uuid/uuid.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:location/location.dart' as loca;
+import 'package:mailer/mailer.dart' as mail;
+import 'package:mailer/smtp_server.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
+import 'package:google_places_flutter/google_places_flutter.dart';
+import 'package:google_places_flutter/model/prediction.dart';
+//import '../../LocationSearchField.dart';
+//import 'package:js/js_util.dart' as js_util;
+//import '../../js_interop/google_maps_web.dart';
+//import '../../js_interop/places_service.dart';
+import '../../js_interop/places_service.dart';
+import '../FastTranslationService.dart';
+//import 'package:uuid/uuid.dart';
+import 'package:http/http.dart' as http;
+//import 'package:juclean/js_interop/google_maps_web.dart' as map
+
+//if (dart.library.html) '../web/google_maps_web.dart';
+class BookingScreen extends StatefulWidget {
+final String serviceId;
+final String serviceName;
+final double servicePrice;
+final String serviceImg;
+
+const BookingScreen({
+super.key,
+required this.serviceId,
+required this.serviceName,
+required this.servicePrice,
+required this.serviceImg,
+});
+
+@override
+State<BookingScreen> createState() => _BookingScreenState();
+}
+
+class _BookingScreenState extends State<BookingScreen> {
+final FirebaseAuth _auth = FirebaseAuth.instance;
+final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+late User user;
+final TextEditingController _searchPlaceController = TextEditingController();
+DateTime? _selectedDate;
+TimeOfDay? _selectedTime;
+String _notes = '';
+bool _isLoading = false;
+LatLng? _currentLocation;
+String? _locationAddress;
+var link;
+Map<String, dynamic>? _selectedPlaceDetails;
+bool isLoadingUser = true;
+bool _isMalay = false;
+bool _isRefreshing = false;
+bool _isBiometricEnabled = false;
+bool _isBiometricAvailable = false;
+final searchController = TextEditingController();
+final String token = '1234567890';
+var uuid = const Uuid();
+List<dynamic> listOfLocation = [];
+final _sessionToken = Uuid().v4();
+Timer? _debounceTimer;
+
+void _onSearchChanged(String query) {
+if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
+_debounceTimer = Timer(const Duration(milliseconds: 500), () {
+if (query.length >= 3) {
+_placeAutocomplete(query);
+} else {
+setState(() => listOfLocation = []);
+}
+});
+}
+
+Future<void> _placeAutocomplete(String query) async {
+const apiKey = "AIzaSyAL9E3CEvdhlTAwN2oE2ROH1G6UgmPZ4Mk";
+const baseUrl = "https://maps.googleapis.com/maps/api/place/autocomplete/json";
+
+try {
+final uri = Uri.parse('$baseUrl?input=$query&key=$apiKey'
+'&components=country:de'
+'&language=en'
+'&types=address'
+'&sessiontoken=$_sessionToken');
+
+final response = await http.get(uri).timeout(const Duration(seconds: 5));
+
+if (response.statusCode == 200) {
+final data = json.decode(response.body);
+if (data['status'] == 'OK') {
+setState(() {
+listOfLocation = (data['predictions'] as List).map((prediction) {
+return {
+'description': prediction['description'],
+'place_id': prediction['place_id'],
+'main_text': prediction['structured_formatting']['main_text'],
+'secondary_text': prediction['structured_formatting']['secondary_text'],
+};
+}).toList();
+});
+} else {
+debugPrint("Autocomplete API error: ${data['status']}");
+setState(() => listOfLocation = []);
+}
+} else {
+throw Exception("HTTP error ${response.statusCode}");
+}
+} catch (e) {
+debugPrint("Autocomplete error: $e");
+setState(() => listOfLocation = []);
+/*  ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: translatedtranslatedText('Error searching locations: ${e.toString()}')),
+      );*/
+}
+}
+
+Future<Map<String, dynamic>?> _getPlaceDetails(String placeId) async {
+const apiKey = "AIzaSyAL9E3CEvdhlTAwN2oE2ROH1G6UgmPZ4Mk";
+const baseUrl = "https://maps.googleapis.com/maps/api/place/details/json";
+
+try {
+final uri = Uri.parse('$baseUrl?place_id=$placeId&key=$apiKey'
+'&fields=formatted_address,geometry'
+'&sessiontoken=$_sessionToken');
+
+final response = await http.get(uri).timeout(const Duration(seconds: 5));
+
+if (response.statusCode == 200) {
+final data = json.decode(response.body);
+if (data['status'] == 'OK') {
+final result = data['result'];
+return {
+'address': result['formatted_address'],
+'latitude': result['geometry']['location']['lat'],
+'longitude': result['geometry']['location']['lng'],
+};
+}
+}
+return null;
+} catch (e) {
+debugPrint("Place details error: $e");
+return null;
+}
+}
+
+// Proxy server URL - change this to your deployed proxy server URL
+static const String PROXY_SERVER_URL = "http://localhost:5001";
+
+_onChange() {
+placeSuggestion(_addressController.text);
+}
+late TextEditingController _controller;
+List<Map<String, dynamic>> _results = [];
+Future<void> onPlaceSelected(int index) async {
+if (index >= listOfLocation.length) return;
+
+final placeId = listOfLocation[index]['place_id'];
+setState(() => _isLoading = true);
+
+try {
+final details = await getPlaceDetails(placeId);
+if (details != null) {
+setState(() {
+_addressController.text = details['address'];
+_currentLocation = LatLng(details['latitude'], details['longitude']);
+listOfLocation = [];
+});
+}
+} catch (e) {
+debugPrint("Error selecting place: $e");
+ScaffoldMessenger.of(context).showSnackBar(
+SnackBar(content: translatedtranslatedText('Error selecting location')),
+);
+} finally {
+setState(() => _isLoading = false);
+}
+}
+
+Future<Map<String, dynamic>?> getPlaceDetails(String placeId) async {
+if(kIsWeb){
+/*await PlacesService.ensureInitialized(); // Must complete before using Autocomplete or PlacesServiceJS
+
+final mapsObject = js_util.getProperty(html.window, 'google');
+final maps = js_util.getProperty(mapsObject, 'maps');
+final places = js_util.getProperty(maps, 'places');
+final service = js_util.callConstructor(
+js_util.getProperty(places, 'PlacesService'),
+[html.document.createElement('div')]);
+
+final completer = Completer<Map<String, dynamic>?>();
+
+js_util.callMethod(service, 'getDetails', [
+js_util.jsify({
+'placeId': placeId,
+'fields': ['formatted_address', 'geometry']
+}),
+allowInterop((place, status) {
+if (status == 'OK' && place != null) {
+completer.complete({
+'address': place['formatted_address'],
+'latitude': place['geometry']['location'].lat(),
+'longitude': place['geometry']['location'].lng(),
+});
+} else {
+completer.complete(null);
+}
+})
+]);
+
+return completer.future.timeout(const Duration(seconds: 5),
+onTimeout: () => null);*/
+}
+else{
+try {
+final uri = Uri.parse('$PROXY_SERVER_URL/api/places/details').replace(
+queryParameters: {
+'place_id': placeId,
+'fields': 'formatted_address,geometry',
+},
+);
+
+debugPrint("Place details request URI: ${uri.toString()}");
+
+final response = await http.get(
+uri,
+headers: {'Accept': 'application/json'},
+).timeout(const Duration(seconds: 10));
+
+debugPrint("Place details response status: ${response.statusCode}");
+debugPrint("Place details response body: ${response.body}");
+
+if (response.statusCode == 200) {
+final data = json.decode(response.body);
+if (data['status'] == 'OK') {
+final result = data['result'];
+return {
+'address': result['formatted_address'],
+'latitude': result['geometry']['location']['lat'],
+'longitude': result['geometry']['location']['lng'],
+};
+}
+}
+return null;
+} catch (e) {
+debugPrint("Error in getPlaceDetails: $e");
+return null;
+}
+}
+}
+
+void placeSuggestion(String input) async {
+if (input.isEmpty || input.length < 3) {
+setState(() => listOfLocation = []);
+return;
+}
+
+try {
+final uri = Uri.parse('$PROXY_SERVER_URL/api/places/autocomplete').replace(
+queryParameters: {
+'input': input,
+'components': 'country:de',
+'language': 'en',
+'types': 'address',
+},
+);
+
+debugPrint("Request URI: ${uri.toString()}");
+
+final response = await http.get(
+uri,
+headers: {'Accept': 'application/json'},
+).timeout(const Duration(seconds: 10));
+
+debugPrint("Response status: ${response.statusCode}");
+debugPrint("Response body: ${response.body}");
+
+if (response.statusCode == 200) {
+final data = json.decode(response.body);
+if (data['status'] == 'OK') {
+setState(() {
+listOfLocation = (data['predictions'] as List).map((prediction) {
+return {
+'description': prediction['description'],
+'place_id': prediction['place_id'],
+'main_text': prediction['structured_formatting']['main_text'],
+'secondary_text': prediction['structured_formatting']['secondary_text'],
+};
+}).toList();
+});
+} else {
+debugPrint("API Error: ${data['status']} - ${data['error_message'] ?? 'No error message'}");
+setState(() => listOfLocation = []);
+}
+} else {
+throw Exception("HTTP Error ${response.statusCode}");
+}
+} catch (e) {
+/*    debugPrint("Error fetching places: $e");
+      setState(() => listOfLocation = []);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: translatedtranslatedText('Error fetching locations: ${e.toString()}')),
+      );*/
+}
+}
+
+final TextEditingController _addressController = TextEditingController();
+final TextEditingController _placesController = TextEditingController();
+
+@override
+void initState() {
+super.initState();
+user = _auth.currentUser!;
+_getCurrentLocation();
+_getLanguagePreference();
+_initializeTranslations();
+_addressController.addListener(() {
+_onChange();
+});
+/*_controller = TextEditingController()
+..addListener(() async {
+final input = _controller.text;
+if (input.length >= 3) {
+final places = await PlacesService.getAutocomplete(input);
+setState(() {
+_results = places;
+});
+}
+});*/
+}
+
+@override
+void dispose() {
+_addressController.dispose();
+_placesController.dispose();
+super.dispose();
+}
+
+Future<void> _toggleLanguage(bool value) async {
+final prefs = await SharedPreferences.getInstance();
+await prefs.setBool('malys', value);
+setState(() {
+_isMalay = value;
+_isRefreshing = true;
+});
+
+await Future.delayed(const Duration(milliseconds: 500));
+
+setState(() {
+_isRefreshing = false;
+});
+}
+
+Future<void> _getLanguagePreference() async {
+final prefs = await SharedPreferences.getInstance();
+setState(() {
+_isMalay = prefs.getBool('malys') ?? false;
+});
+}
+
+Future<void> _initializeTranslations() async {
+final prefs = await SharedPreferences.getInstance();
+final isMalay = prefs.getBool('malys') ?? false;
+await FastTranslationService.init(isMalay);
+}
+
+Widget translatedText(String text, {TextStyle? style}) {
+return Text(
+FastTranslationService.translate(text),
+style: style,
+);
+}
+
+Future<void> _getCurrentLocation() async {
+setState(() {
+_isLoading = true;
+});
+
+try {
+if (kIsWeb) {
+final permission = await Geolocator.requestPermission();
+
+if (permission == LocationPermission.denied ||
+permission == LocationPermission.deniedForever) {
+throw 'Location permissions denied';
+}
+
+final position = await Geolocator.getCurrentPosition();
+setState(() {
+_currentLocation = LatLng(position.latitude, position.longitude);
+link = 'https://www.google.com/maps?q=${position.latitude},${position.longitude}';
+_isLoading = false;
+});
+
+await _updateLocationAddress(_currentLocation!);
+return;
+}
+
+// Mobile implementation
+final location = loca.Location();
+bool serviceEnabled;
+loca.PermissionStatus permissionGranted;
+
+serviceEnabled = await location.serviceEnabled();
+if (!serviceEnabled) {
+serviceEnabled = await location.requestService();
+if (!serviceEnabled) {
+setState(() {
+_isLoading = false;
+});
+return;
+}
+}
+
+permissionGranted = await location.hasPermission();
+if (permissionGranted == loca.PermissionStatus.denied) {
+permissionGranted = await location.requestPermission();
+if (permissionGranted != loca.PermissionStatus.granted) {
+setState(() {
+_isLoading = false;
+});
+return;
+}
+}
+
+final locationData = await location.getLocation();
+setState(() {
+_currentLocation = LatLng(
+locationData.latitude!,
+locationData.longitude!,
+);
+link = 'https://www.google.com/maps?q=${locationData.latitude},${locationData.longitude}';
+_isLoading = false;
+});
+
+await _updateLocationAddress(_currentLocation!);
+
+ScaffoldMessenger.of(context).showSnackBar(
+SnackBar(
+content: translatedtranslatedText('Location obtained successfully'),
+backgroundColor: Colors.green,
+),
+);
+} catch (e) {
+setState(() {
+_isLoading = false;
+});
+ScaffoldMessenger.of(context).showSnackBar(
+SnackBar(
+content: translatedtranslatedText('Error getting location: $e'),
+backgroundColor: Colors.red,
+),
+);
+}
+}
+
+Future<void> _updateLocationAddress(LatLng location) async {
+try {
+final placemarks = await placemarkFromCoordinates(
+location.latitude,
+location.longitude,
+);
+
+if (placemarks.isNotEmpty) {
+final place = placemarks.first;
+setState(() {
+_locationAddress = '${place.street}, ${place.postalCode} ${place.locality}, ${place.country}';
+_addressController.text = _locationAddress!;
+});
+}
+} catch (e) {
+setState(() {
+_locationAddress = '${location.latitude}, ${location.longitude}';
+_addressController.text = _locationAddress!;
+});
+}
+}
+
+Future<void> _selectDate(BuildContext context) async {
+final DateTime? picked = await showDatePicker(
+context: context,
+initialDate: DateTime.now(),
+firstDate: DateTime.now(),
+lastDate: DateTime.now().add(const Duration(days: 365)),
+builder: (context, child) {
+return Theme(
+data: Theme.of(context).copyWith(
+colorScheme: const ColorScheme.light(
+primary: Colors.teal,
+onPrimary: Colors.white,
+onSurface: Colors.black,
+),
+textButtonTheme: TextButtonThemeData(
+style: TextButton.styleFrom(
+foregroundColor: Colors.teal,
+),
+),
+),
+child: child!,
+);
+},
+);
+if (picked != null && picked != _selectedDate) {
+setState(() {
+_selectedDate = picked;
+});
+}
+}
+
+Future<void> _selectTime(BuildContext context) async {
+final TimeOfDay? picked = await showTimePicker(
+context: context,
+initialTime: TimeOfDay.now(),
+builder: (context, child) {
+return Theme(
+data: Theme.of(context).copyWith(
+colorScheme: const ColorScheme.light(
+primary: Colors.teal,
+onPrimary: Colors.white,
+onSurface: Colors.black,
+),
+textButtonTheme: TextButtonThemeData(
+style: TextButton.styleFrom(
+foregroundColor: Colors.teal,
+),
+),
+),
+child: child!,
+);
+},
+);
+if (picked != null && picked != _selectedTime) {
+setState(() {
+_selectedTime = picked;
+});
+}
+}
+var lat , long;
+Future<void> _submitBooking() async {
+if (_selectedDate == null || _selectedTime == null || _currentLocation == null) {
+ScaffoldMessenger.of(context).showSnackBar(
+SnackBar(content: translatedtranslatedText('Please select date, time, and location')),
+);
+return;
+}
+
+setState(() => _isLoading = true);
+
+try {
+final orderId = 'ORD-${DateTime.now().millisecondsSinceEpoch}';
+
+final bookingDateTime = DateTime(
+_selectedDate!.year,
+_selectedDate!.month,
+_selectedDate!.day,
+_selectedTime!.hour,
+_selectedTime!.minute,
+);
+
+await _firestore.collection('bookings').doc(orderId).set({
+'orderId': orderId,
+'userId': user.uid,
+'userEmail': user.email,
+'serviceId': widget.serviceId,
+'serviceName': widget.serviceName,
+'servicePrice': ' ',
+'bookingDateTime': bookingDateTime,
+'img': widget.serviceImg,
+'notes': _notes,
+'status': 'pending',
+'createdAt': FieldValue.serverTimestamp(),
+'updatedAt': FieldValue.serverTimestamp(),
+'selectedCoordinates': GeoPoint(
+lat ?? _currentLocation!.latitude,
+long ?? _currentLocation!.longitude,
+),
+'mapLink': link.toString(),
+'selectedLocationAddress': _locationAddress,
+});
+
+if (!kIsWeb) {
+sendNotificationToAdmin(orderId?? 'id', widget.serviceName.toString());
+final gmailSmtp = SmtpServer(
+'smtp.gmail.com',
+username: 'juclean988@gmail.com',
+password: 'fknp eufo jpjf wplh',
+port: 465,
+ssl: true,
+);
+
+final message = mail.Message()
+..from = mail.Address(dotenv.env["GMAIL_MAIL"]!, 'JUCLEAN')
+..recipients.add(FirebaseAuth.instance.currentUser!.email.toString())
+..subject = 'Booking Confirmation - You\'re on the Waiting List'
+..html = '''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JUclean Booking Confirmation</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f7fa;
+        }
+        .email-container {
+            max-width: 640px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+        }
+        .header {
+            background: linear-gradient(135deg, #0d9488 0%, #115e59 100%);
+            padding: 40px 20px;
+            text-align: center;
+            color: white;
+            position: relative;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 700;
+        }
+        .header p {
+            margin: 8px 0 0;
+            font-weight: 400;
+            opacity: 0.9;
+        }
+        .content {
+            padding: 32px;
+        }
+        .section {
+            margin-bottom: 24px;
+        }
+        .section-title {
+            color: #0d9488;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 8px;
+        }
+        .booking-card {
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #0d9488;
+        }
+        .booking-row {
+            display: flex;
+            margin-bottom: 12px;
+        }
+        .booking-label {
+            width: 120px;
+            font-weight: 600;
+            color: #374151;
+        }
+        .booking-value {
+            flex: 1;
+            color: #6b7280;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 6px 12px;
+            background: #fef3c7;
+            color: #92400e;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .footer {
+            background: #f9fafb;
+            padding: 24px 32px;
+            text-align: center;
+            border-top: 1px solid #e5e7eb;
+        }
+        .footer p {
+            margin: 0;
+            color: #6b7280;
+            font-size: 14px;
+        }
+        .contact-info {
+            margin-top: 16px;
+        }
+        .contact-info a {
+            color: #0d9488;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .social-links {
+            margin-top: 16px;
+        }
+        .social-links a {
+            display: inline-block;
+            margin: 0 8px;
+            color: #6b7280;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="header">
+            <h1>🎉 Booking Confirmed!</h1>
+            <p>You're on the waiting list for premium cleaning services</p>
+        </div>
+
+        <div class="content">
+            <div class="section">
+                <h2 class="section-title">📋 Booking Details</h2>
+                <div class="booking-card">
+                    <div class="booking-row">
+                        <div class="booking-label">Order ID:</div>
+                        <div class="booking-value"><strong>$orderId</strong></div>
+                    </div>
+                    <div class="booking-row">
+                        <div class="booking-label">Service:</div>
+                        <div class="booking-value">${widget.serviceName}</div>
+                    </div>
+                    <div class="booking-row">
+                        <div class="booking-label">Date & Time:</div>
+                        <div class="booking-value">${DateFormat('EEEE, MMMM d, y').format(bookingDateTime)} at ${_selectedTime!.format(context)}</div>
+                    </div>
+                    <div class="booking-row">
+                        <div class="booking-label">Location:</div>
+                        <div class="booking-value">$_locationAddress</div>
+                    </div>
+                    <div class="booking-row">
+                        <div class="booking-label">Status:</div>
+                        <div class="booking-value"><span class="status-badge">Pending</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2 class="section-title">⏰ What Happens Next?</h2>
+                <p>Thank you for choosing JUclean! Your booking request has been successfully submitted and you're now on our waiting list. Here's what you can expect:</p>
+                <ul>
+                    <li><strong>Confirmation Call:</strong> Our team will contact you within 24 hours to confirm your booking details</li>
+                    <li><strong>Service Assignment:</strong> We'll assign our best cleaning professionals to your location</li>
+                    <li><strong>Preparation:</strong> Our team will arrive fully equipped with all necessary cleaning supplies</li>
+                    <li><strong>Quality Service:</strong> Enjoy our premium cleaning service at your scheduled time</li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2 class="section-title">📞 Need to Make Changes?</h2>
+                <p>If you need to modify or cancel your booking, please contact us as soon as possible:</p>
+                <div class="contact-info">
+                    <p><strong>Phone:</strong> <a href="tel:+1234567890">+1 (234) 567-890</a></p>
+                    <p><strong>Email:</strong> <a href="mailto:support@juclean.com">support@juclean.com</a></p>
+                    <p><strong>WhatsApp:</strong> <a href="https://wa.me/1234567890">+1 (234) 567-890</a></p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2 class="section-title">💡 Preparation Tips</h2>
+                <p>To ensure the best cleaning experience:</p>
+                <ul>
+                    <li>Please ensure someone is available at the scheduled time</li>
+                    <li>Secure any valuable or fragile items</li>
+                    <li>Provide access to all areas that need cleaning</li>
+                    <li>Let us know about any specific cleaning requirements</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p><strong>JUclean - Premium Cleaning Services</strong></p>
+            <p>Making your space spotless, one clean at a time</p>
+
+            <div class="contact-info">
+                <p>📧 <a href="mailto:info@juclean.com">info@juclean.com</a> | 📞 <a href="tel:+1234567890">+1 (234) 567-890</a></p>
+                <p>🌐 <a href="https://juclean.com">www.juclean.com</a></p>
+            </div>
+
+            <div class="social-links">
+                <a href="#">Facebook</a> |
+                <a href="#">Instagram</a> |
+                <a href="#">Twitter</a> |
+                <a href="#">LinkedIn</a>
+            </div>
+
+            <p style="margin-top: 16px; font-size: 12px; color: #9ca3af;">
+                This email was sent to ${user.email}. If you didn't request this booking, please contact us immediately.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+''';
+
+try {
+await mail.send(message, gmailSmtp);
+debugPrint('Email sent successfully');
+} catch (e) {
+debugPrint('Failed to send email: $e');
+}
+}
+
+ScaffoldMessenger.of(context).showSnackBar(
+SnackBar(
+content: translatedtranslatedText('Booking submitted successfully!'),
+backgroundColor: Colors.green,
+),
+);
+
+Navigator.pop(context);
+} catch (e) {
+ScaffoldMessenger.of(context).showSnackBar(
+SnackBar(
+content: translatedtranslatedText('Error submitting booking: $e'),
+backgroundColor: Colors.red,
+),
+);
+} finally {
+setState(() => _isLoading = false);
+}
+}
+
+@override
+Widget build(BuildContext context) {
+return Scaffold(
+backgroundColor: Colors.grey[50],
+appBar: AppBar(
+title: translatedtranslatedText('Book ${widget.serviceName}',
+style: GoogleFonts.poppins(
+fontWeight: FontWeight.w600,
+color: Colors.white,
+),
+),
+backgroundColor: Colors.teal,
+elevation: 0,
+iconTheme: const IconThemeData(color: Colors.white),
+actions: [
+Switch(
+value: _isMalay,
+onChanged: _toggleLanguage,
+activeColor: Colors.white,
+activeTrackColor: Colors.teal[300],
+inactiveThumbColor: Colors.grey[300],
+inactiveTrackColor: Colors.grey[400],
+),
+const SizedBox(width: 16),
+],
+),
+body: _isRefreshing
+? const Center(child: CircularProgressIndicator(color: Colors.teal))
+    : SingleChildScrollView(
+padding: const EdgeInsets.all(16),
+child: Column(
+crossAxisAlignment: CrossAxisAlignment.start,
+children: [
+// Service Info Card
+Container(
+width: double.infinity,
+padding: const EdgeInsets.all(20),
+decoration: BoxDecoration(
+color: Colors.white,
+borderRadius: BorderRadius.circular(16),
+boxShadow: [
+BoxShadow(
+color: Colors.grey.withOpacity(0.1),
+spreadRadius: 1,
+blurRadius: 10,
+offset: const Offset(0, 2),
+),
+],
+),
+child: Row(
+children: [
+ClipRRect(
+borderRadius: BorderRadius.circular(12),
+child: Image.network(
+widget.serviceImg,
+width: 80,
+height: 80,
+fit: BoxFit.cover,
+errorBuilder: (context, error, stackTrace) {
+return Container(
+width: 80,
+height: 80,
+decoration: BoxDecoration(
+color: Colors.grey[300],
+borderRadius: BorderRadius.circular(12),
+),
+child: const Icon(Icons.image, color: Colors.grey),
+);
+},
+),
+),
+const SizedBox(width: 16),
+Expanded(
+child: Column(
+crossAxisAlignment: CrossAxisAlignment.start,
+children: [
+translatedText(
+widget.serviceName,
+style: GoogleFonts.poppins(
+fontSize: 18,
+fontWeight: FontWeight.w600,
+color: Colors.grey[800],
+),
+),
+const SizedBox(height: 4),
+translatedtranslatedText('  ',
+style: GoogleFonts.poppins(
+fontSize: 16,
+fontWeight: FontWeight.w500,
+color: Colors.teal,
+),
+),
+],
+),
+),
+],
+),
+),
+
+const SizedBox(height: 24),
+
+// Location Section
+// Location Section
+
+Container(
+width: double.infinity,
+padding: const EdgeInsets.all(20),
+decoration: BoxDecoration(
+color: Colors.white,
+borderRadius: BorderRadius.circular(16),
+boxShadow: [
+BoxShadow(
+color: Colors.grey.withOpacity(0.1),
+spreadRadius: 1,
+blurRadius: 10,
+offset: const Offset(0, 2),
+),
+],
+),
+child: Column(
+crossAxisAlignment: CrossAxisAlignment.start,
+children: [
+Row(
+children: [
+Icon(Icons.location_on, color: Colors.teal, size: 24),
+const SizedBox(width: 8),
+translatedtranslatedText('Service Location',
+style: GoogleFonts.poppins(
+fontSize: 18,
+fontWeight: FontWeight.w600,
+color: Colors.grey[800],
+),
+),
+],
+),
+const SizedBox(height: 16),
+/*if (kIsWeb)
+Column(
+children: [
+TextField(
+controller: _controller,
+decoration: InputDecoration(
+labelText: 'Search Location',
+prefixIcon: Icon(Icons.search, color: Colors.teal),
+border: OutlineInputBorder(
+borderRadius: BorderRadius.circular(12),
+),
+),
+),
+SizedBox(height: 10),
+if (_results.isNotEmpty)
+Container(
+constraints: BoxConstraints(maxHeight: 200),
+decoration: BoxDecoration(
+color: Colors.white,
+borderRadius: BorderRadius.circular(12),
+boxShadow: [
+BoxShadow(
+color: Colors.grey.withOpacity(0.2),
+blurRadius: 5,
+spreadRadius: 1,
+),
+],
+),
+child: ListView.builder(
+shrinkWrap: true,
+itemCount: _results.length,
+itemBuilder: (context, index) {
+final item = _results[index];
+return ListTile(
+leading: Icon(Icons.location_on, color: Colors.teal),
+title:translatedtranslatedText(item['description']),
+
+onTap: () async {
+// Show loading state
+setState(() {
+_isLoading = true;
+});
+
+try {
+// Get place details using your existing method
+final details = await PlacesService.getPlaceDetails(item['place_id']);
+
+if (details != null) {
+setState(() {
+_controller.text= details['address'];
+_addressController.text = details['address'];
+_currentLocation = LatLng(
+details['latitude'],
+details['longitude'],
+);
+link = 'https://www.google.com/maps?q=${details['latitude']},${details['longitude']}';
+lat = details['latitude'];
+long = details['longitude'];
+_selectedPlaceDetails = {
+'address': details['address'],
+'latitude': details['latitude'],
+'longitude': details['longitude'],
+};
+listOfLocation = []; // Clear suggestions
+_controller.clear(); // Clear search field
+});
+} else {
+ScaffoldMessenger.of(context).showSnackBar(
+SnackBar(content: translatedtranslatedText('Failed to get location details')),
+);
+}
+} catch (e) {
+debugPrint("Error getting place details: $e");
+ScaffoldMessenger.of(context).showSnackBar(
+SnackBar(content: translatedtranslatedText('Error selecting location: $e')),
+);
+} finally {
+setState(() {
+_isLoading = false;
+});
+}
+},
+);
+},
+),
+)
+else
+translatedtranslatedText('No results found'),
+],
+),*/
+
+// Address Input Field
+if(!kIsWeb)
+TextField(
+controller: _addressController,
+decoration: InputDecoration(
+hintText: 'Enter address in Germany...',
+prefixIcon: const Icon(Icons.search, color: Colors.teal),
+border: OutlineInputBorder(
+borderRadius: BorderRadius.circular(12),
+),
+focusedBorder: OutlineInputBorder(
+borderRadius: BorderRadius.circular(12),
+borderSide: const BorderSide(color: Colors.teal, width: 2),
+),
+),
+onChanged: _onSearchChangedWEB,
+),
+if (listOfLocation.isNotEmpty && kIsWeb == true)
+Container(
+constraints: const BoxConstraints(maxHeight: 200),
+margin: const EdgeInsets.only(top: 8),
+decoration: BoxDecoration(
+color: Colors.white,
+borderRadius: BorderRadius.circular(12),
+boxShadow: [
+BoxShadow(
+color: Colors.grey.withOpacity(0.2),
+blurRadius: 5,
+spreadRadius: 1,
+),
+],
+),
+child: ListView.builder(
+shrinkWrap: true,
+itemCount: listOfLocation.length,
+itemBuilder: (context, index) {
+final location = listOfLocation[index];
+return ListTile(
+leading: const Icon(Icons.location_on, color: Colors.teal),
+title:translatedtranslatedText(location['main_text']),
+subtitle:translatedtranslatedText(location['secondary_text'] ?? ''),
+onTap: () async {
+final details = await _getPlaceDetails(location['place_id']);
+if (details != null) {
+setState(() {
+_addressController.text = details['address'];
+_currentLocation = LatLng(
+details['latitude'],
+details['longitude'],
+);
+link = 'https://www.google.com/maps?q=${details['latitude']},${details['longitude']}';
+long = details['longitude'];
+lat = details['latitude'];
+_selectedPlaceDetails = {
+'address': details['address'],
+'latitude': details['latitude'],
+'longitude': details['longitude'],
+};
+listOfLocation = [];
+});
+}
+},
+);
+},
+),
+),
+
+if (listOfLocation.isNotEmpty && kIsWeb == false)
+Container(
+constraints: const BoxConstraints(maxHeight: 200),
+margin: const EdgeInsets.only(top: 8),
+decoration: BoxDecoration(
+color: Colors.white,
+borderRadius: BorderRadius.circular(12),
+boxShadow: [
+BoxShadow(
+color: Colors.grey.withOpacity(0.2),
+blurRadius: 5,
+spreadRadius: 1,
+),
+],
+),
+child: ListView.builder(
+shrinkWrap: true,
+itemCount: listOfLocation.length,
+itemBuilder: (context, index) {
+final location = listOfLocation[index];
+return ListTile(
+leading: const Icon(Icons.location_on, color: Colors.teal),
+title:translatedtranslatedText(location['main_text']),
+subtitle:translatedtranslatedText(location['secondary_text'] ?? ''),
+onTap: () async {
+final details = await _getPlaceDetails(location['place_id']);
+if (details != null) {
+setState(() {
+_addressController.text = details['address'];
+_currentLocation = LatLng(
+details['latitude'],
+details['longitude'],
+);
+link = 'https://www.google.com/maps?q=${details['latitude']},${details['longitude']}';
+long = details['longitude'];
+lat = details['latitude'];
+_selectedPlaceDetails = {
+'address': details['address'],
+'latitude': details['latitude'],
+'longitude': details['longitude'],
+};
+listOfLocation = [];
+});
+}
+},
+);
+},
+),
+),
+
+// Show selected address details
+if (_selectedPlaceDetails != null || _locationAddress != null)
+Container(
+margin: const EdgeInsets.only(top: 16),
+padding: const EdgeInsets.all(16),
+decoration: BoxDecoration(
+color: Colors.grey[50],
+borderRadius: BorderRadius.circular(12),
+border: Border.all(color: Colors.grey[300]!),
+),
+child: Column(
+crossAxisAlignment: CrossAxisAlignment.start,
+children: [
+Row(
+children: [
+Icon(Icons.location_on, color: Colors.teal, size: 20),
+const SizedBox(width: 8),
+translatedtranslatedText('Selected Location',
+style: GoogleFonts.poppins(
+fontSize: 14,
+fontWeight: FontWeight.w600,
+color: Colors.grey[800],
+),
+),
+],
+),
+const SizedBox(height: 8),
+Text(
+_selectedPlaceDetails?['address'] ?? _locationAddress ?? '',
+style: GoogleFonts.poppins(
+fontSize: 13,
+color: Colors.grey[700],
+),
+),
+const SizedBox(height: 8),
+if (_currentLocation != null)
+InkWell(
+onTap: () => launchUrl(Uri.parse(link)),
+child: translatedtranslatedText('View on Map',
+style: GoogleFonts.poppins(
+fontSize: 12,
+color: Colors.teal,
+decoration: TextDecoration.underline,
+),
+),
+),
+],
+),
+),
+
+const SizedBox(height: 16),
+
+// Current Location Button
+SizedBox(
+width: double.infinity,
+child: ElevatedButton.icon(
+onPressed: _isLoading ? null : _getCurrentLocation,
+icon: _isLoading
+? const SizedBox(
+width: 16,
+height: 16,
+child: CircularProgressIndicator(
+strokeWidth: 2,
+color: Colors.white,
+),
+)
+    : const Icon(Icons.my_location, color: Colors.white),
+label: translatedText(
+_isLoading ? 'Getting location...' : 'Use Current Location',
+style: GoogleFonts.poppins(
+fontWeight: FontWeight.w500,
+color: Colors.white,
+),
+),
+style: ElevatedButton.styleFrom(
+backgroundColor: Colors.teal,
+padding: const EdgeInsets.symmetric(vertical: 12),
+shape: RoundedRectangleBorder(
+borderRadius: BorderRadius.circular(12),
+),
+),
+),
+),
+],
+),
+),
+
+const SizedBox(height: 24),
+
+// Date & Time Section
+Container(
+width: double.infinity,
+padding: const EdgeInsets.all(20),
+decoration: BoxDecoration(
+color: Colors.white,
+borderRadius: BorderRadius.circular(16),
+boxShadow: [
+BoxShadow(
+color: Colors.grey.withOpacity(0.1),
+spreadRadius: 1,
+blurRadius: 10,
+offset: const Offset(0, 2),
+),
+],
+),
+child: Column(
+crossAxisAlignment: CrossAxisAlignment.start,
+children: [
+Row(
+children: [
+Icon(Icons.schedule, color: Colors.teal, size: 24),
+const SizedBox(width: 8),
+translatedtranslatedText('Schedule',
+style: GoogleFonts.poppins(
+fontSize: 18,
+fontWeight: FontWeight.w600,
+color: Colors.grey[800],
+),
+),
+],
+),
+const SizedBox(height: 16),
+
+Row(
+children: [
+// Date Selection
+Expanded(
+child: GestureDetector(
+onTap: () => _selectDate(context),
+child: Container(
+padding: const EdgeInsets.all(16),
+decoration: BoxDecoration(
+color: Colors.grey[50],
+borderRadius: BorderRadius.circular(12),
+border: Border.all(color: Colors.grey[300]!),
+),
+child: Column(
+crossAxisAlignment: CrossAxisAlignment.start,
+children: [
+translatedtranslatedText('Date',
+style: GoogleFonts.poppins(
+fontSize: 12,
+color: Colors.grey[600],
+fontWeight: FontWeight.w500,
+),
+),
+const SizedBox(height: 4),
+Row(
+children: [
+Icon(Icons.calendar_today,
+color: Colors.teal, size: 16),
+const SizedBox(width: 8),
+Expanded(
+child:translatedtranslatedText(
+_selectedDate != null
+? DateFormat('MMM dd, yyyy').format(_selectedDate!)
+    : FastTranslationService.translate('Select date'),
+style: GoogleFonts.poppins(
+fontSize: 14,
+fontWeight: FontWeight.w500,
+color: _selectedDate != null
+? Colors.grey[800]
+    : Colors.grey[500],
+),
+),
+),
+],
+),
+],
+),
+),
+),
+),
+
+const SizedBox(width: 12),
+
+// Time Selection
+Expanded(
+child: GestureDetector(
+onTap: () => _selectTime(context),
+child: Container(
+padding: const EdgeInsets.all(16),
+decoration: BoxDecoration(
+color: Colors.grey[50],
+borderRadius: BorderRadius.circular(12),
+border: Border.all(color: Colors.grey[300]!),
+),
+child: Column(
+crossAxisAlignment: CrossAxisAlignment.start,
+children: [
+translatedtranslatedText('Time',
+style: GoogleFonts.poppins(
+fontSize: 12,
+color: Colors.grey[600],
+fontWeight: FontWeight.w500,
+),
+),
+const SizedBox(height: 4),
+Row(
+children: [
+Icon(Icons.access_time,
+color: Colors.teal, size: 16),
+const SizedBox(width: 8),
+Expanded(
+child:translatedtranslatedText(
+_selectedTime != null
+? _selectedTime!.format(context)
+    : FastTranslationService.translate('Select time'),
+style: GoogleFonts.poppins(
+fontSize: 14,
+fontWeight: FontWeight.w500,
+color: _selectedTime != null
+? Colors.grey[800]
+    : Colors.grey[500],
+),
+),
+),
+],
+),
+],
+),
+),
+),
+),
+],
+),
+],
+),
+),
+
+const SizedBox(height: 24),
+
+// Notes Section
+Container(
+width: double.infinity,
+padding: const EdgeInsets.all(20),
+decoration: BoxDecoration(
+color: Colors.white,
+borderRadius: BorderRadius.circular(16),
+boxShadow: [
+BoxShadow(
+color: Colors.grey.withOpacity(0.1),
+spreadRadius: 1,
+blurRadius: 10,
+offset: const Offset(0, 2),
+),
+],
+),
+child: Column(
+crossAxisAlignment: CrossAxisAlignment.start,
+children: [
+Row(
+children: [
+Icon(Icons.note_add, color: Colors.teal, size: 24),
+const SizedBox(width: 8),
+translatedtranslatedText('Additional Notes',
+style: GoogleFonts.poppins(
+fontSize: 18,
+fontWeight: FontWeight.w600,
+color: Colors.grey[800],
+),
+),
+],
+),
+const SizedBox(height: 16),
+
+TextFormField(
+maxLines: 4,
+onChanged: (value) => _notes = value,
+decoration: InputDecoration(
+hintText: FastTranslationService.translate('Any special instructions or requirements...'),
+border: OutlineInputBorder(
+borderRadius: BorderRadius.circular(12),
+borderSide: BorderSide(color: Colors.grey[300]!),
+),
+focusedBorder: OutlineInputBorder(
+borderRadius: BorderRadius.circular(12),
+borderSide: const BorderSide(color: Colors.teal, width: 2),
+),
+filled: true,
+fillColor: Colors.grey[50],
+),
+style: GoogleFonts.poppins(),
+),
+],
+),
+),
+
+const SizedBox(height: 32),
+
+// Submit Button
+SizedBox(
+width: double.infinity,
+child: ElevatedButton(
+onPressed: _isLoading ? null : _submitBooking,
+style: ElevatedButton.styleFrom(
+backgroundColor: Colors.teal,
+padding: const EdgeInsets.symmetric(vertical: 16),
+shape: RoundedRectangleBorder(
+borderRadius: BorderRadius.circular(12),
+),
+elevation: 2,
+),
+child: _isLoading
+? const SizedBox(
+width: 20,
+height: 20,
+child: CircularProgressIndicator(
+strokeWidth: 2,
+color: Colors.white,
+),
+)
+    : translatedtranslatedText('Submit Booking Request',
+style: GoogleFonts.poppins(
+fontSize: 16,
+fontWeight: FontWeight.w600,
+color: Colors.white,
+),
+),
+),
+),
+
+const SizedBox(height: 16),
+
+// Info Text
+Container(
+width: double.infinity,
+padding: const EdgeInsets.all(16),
+decoration: BoxDecoration(
+color: Colors.blue[50],
+borderRadius: BorderRadius.circular(12),
+border: Border.all(color: Colors.blue[200]!),
+),
+child: Row(
+children: [
+Icon(Icons.info_outline, color: Colors.blue[600], size: 20),
+const SizedBox(width: 12),
+Expanded(
+child: translatedtranslatedText('Your booking request will be reviewed and confirmed within 24 hours. You will receive a confirmation email shortly.',
+style: GoogleFonts.poppins(
+fontSize: 12,
+color: Colors.blue[700],
+),
+),
+),
+],
+),
+),
+],
+),
+),
+);
+}
+
+
+// ...
+
+
+// Replace your current _onSearchChanged with:
+void _onSearchChangedWEB(String query) async {
+  if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
+
+  _debounceTimer = Timer(const Duration(milliseconds: 500), () async {
+    if (query.length < 3) {
+      setState(() => listOfLocation = []);
+      return;
+    }
+if(!kIsWeb){
+    try {
+      final placesService = PlacesService.instance;
+      final predictions = await placesService.getAutocomplete(query);
+
+      setState(() {
+        listOfLocation = predictions.map((p) {
+          // Handle different response structures between web and mobile
+          final description = p['description'] ?? '';
+          final placeId = p['place_id'] ?? '';
+
+          // For mobile (HTTP API), we don't get structured_formatting
+          // For web (JS API), we do get structured_formatting
+          final mainText = p['structured_formatting']?['main_text'] ??
+              description.split(',').first.trim();
+          final secondaryText = p['structured_formatting']?['secondary_text'] ??
+              description.replaceFirst(mainText, '').replaceFirst(',', '').trim();
+
+          return {
+            'description': description,
+            'place_id': placeId,
+            'main_text': mainText,
+            'secondary_text': secondaryText,
+          };
+        }).toList();
+      });
+    } catch (e) {
+      if (kDebugMode) {
+        print('Autocomplete error: $e');
+      }
+      setState(() => listOfLocation = []);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error searching locations: ${e.toString()}')),
+        );
+      }
+    }
+
+}else{
+/*  try {
+    final predictions = await PlacesService.getAutocomplete(query);
+    setState(() {
+      listOfLocation = predictions.map((p) => {
+        'description': p['description'],
+        'place_id': p['place_id'],
+        'main_text': p['structured_formatting']['main_text'],
+        'secondary_text': p['structured_formatting']['secondary_text'],
+      }).toList();
+    });
+  } catch (e) {
+    if (kDebugMode) print('Autocomplete error: $e');
+    setState(() => listOfLocation = []);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: translatedtranslatedText('Error searching locations: $e')),
+    );
+  }*/
+}
+
+});
+}
+
+// Replace your current _getPlaceDetails with:
+
+
+
+// Replace your _getPlaceDetails method with:
+  Future<void> sendNotificationToAdmin(String orderId, String serviceName) async {
+    if (!mounted) return; // Check if widget is still mounted
+
+    try {
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'sendAdminNotification',
+        options: HttpsCallableOptions(
+          timeout: const Duration(seconds: 30),
+        ),
+      );
+
+      final result = await callable.call(<String, dynamic>{
+        'orderId': orderId,
+        'serviceName': serviceName,
+      });
+
+      if (mounted && result.data['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Admin notified successfully!")),
+        );
+      }
+    } on FirebaseFunctionsException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Notification failed: ${e.message}")),
+        );
+      }
+      debugPrint("Firebase Functions error: ${e.code} - ${e.message}");
+    } catch (e, stack) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("An unexpected error occurred")),
+        );
+      }
+      debugPrint("Error: $e\n$stack");
+    }
+  }
+
+// Replace your current _getPlaceDetails with:
+}
+

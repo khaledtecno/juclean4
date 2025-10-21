@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!-- Base href managed by Flutter -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="juclean for cleaning services">
+
+  <!-- Mobile meta tags -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="juclean">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" href="favicon.png"/>
+  <title>juclean</title>
+  <link rel="manifest" href="manifest.json">
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-storage.js"></script>
+
+  <!-- Initialize Firebase -->
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyCr4lEug1ej_5kgPedU9XMsp5ap-DOtKHY",
+      authDomain: "juclean-69af4.firebaseapp.com",
+      projectId: "juclean-69af4",
+      storageBucket: "juclean-69af4.firebasestorage.app",
+      messagingSenderId: "206535405160",
+      appId: "1:206535405160:web:be586469438d587cf615dd",
+      measurementId: "G-LD3X3YV3Z9"
+    };
+
+    // Initialize Firebase
+    const app = firebase.initializeApp(firebaseConfig);
+    const firestore = firebase.firestore();
+  </script>
+
+  <!-- Google Maps SDK -->
+  <script>
+    // Promise resolved once Google Maps loads
+    window.googleMapsReady = new Promise((resolve) => {
+      window.initMap = () => {
+        console.log("Google Maps SDK loaded");
+        resolve();
+      };
+    });
+  </script>
+
+  <!-- Load Google Maps SDK only once -->
+  <script
+          src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAL9E3CEvdhlTAwN2oE2ROH1G6UgmPZ4Mk&libraries=places&callback=initMap"
+          async
+          defer
+  ></script>
+
+  <!-- Flutter & Geolocation -->
+  <script src="flutter.js" defer></script>
+  <script type="application/javascript">
+    window.addEventListener('load', function () {
+      _flutter.loader.loadEntrypoint({
+        serviceWorker: {
+          serviceWorkerVersion: serviceWorkerVersion,
+        }
+      }).then(function (engineInitializer) {
+        return engineInitializer.initializeEngine();
+      }).then(function (appRunner) {
+        return appRunner.runApp();
+      });
+    });
+
+    // Optional geolocation check
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        function (position) { /* Position available */ },
+        function (error) { /* Error occurred */ }
+      );
+    }
+  </script>
+
+  <!-- Bootstrap -->
+  <script src="flutter_bootstrap.js" async></script>
+</head>
+<body>
+</body>
+</html>

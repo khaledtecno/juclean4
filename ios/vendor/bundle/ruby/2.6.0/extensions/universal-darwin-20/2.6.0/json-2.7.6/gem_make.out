@@ -1,0 +1,19 @@
+current directory: /Volumes/NO NAME/jucleanIO/ios/vendor/bundle/ruby/2.6.0/gems/json-2.7.6/ext/json/ext/parser
+/System/Library/Frameworks/Ruby.framework/Versions/2.6/usr/bin/ruby -I /System/Library/Frameworks/Ruby.framework/Versions/2.6/usr/lib/ruby/2.6.0 -r ./siteconf20251021-58751-9tnmwv.rb extconf.rb
+checking for rb_enc_raise() in ruby.h... yes
+checking for rb_enc_interned_str() in ruby.h... no
+checking for whether -std=c99 is accepted as CFLAGS... yes
+creating Makefile
+
+current directory: /Volumes/NO NAME/jucleanIO/ios/vendor/bundle/ruby/2.6.0/gems/json-2.7.6/ext/json/ext/parser
+make "DESTDIR=" clean
+
+current directory: /Volumes/NO NAME/jucleanIO/ios/vendor/bundle/ruby/2.6.0/gems/json-2.7.6/ext/json/ext/parser
+make "DESTDIR="
+compiling parser.c
+linking shared-object json/ext/parser.bundle
+ld: warning: directory not found for option '-L/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.7.Internal.sdk/usr/local/lib'
+
+current directory: /Volumes/NO NAME/jucleanIO/ios/vendor/bundle/ruby/2.6.0/gems/json-2.7.6/ext/json/ext/parser
+make "DESTDIR=" install
+/usr/bin/install -c -m 0755 parser.bundle ./.gem.20251021-58751-jd3y5l/json/ext
