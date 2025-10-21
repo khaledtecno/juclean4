@@ -1,5 +1,5 @@
 # Uncomment this line to define a global platform for your project
-# platform :ios, '12.0'
+platform :ios, '12.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -9,16 +9,6 @@ project 'Runner', {
   'Profile' => :release,
   'Release' => :release,
 }
-
-target 'Runner' do
-  use_frameworks!
-  use_modular_headers!
-
-  # Workaround for Google Maps
-  pod 'GoogleMaps', :git => 'https://github.com/googlemaps/ios-maps-sdk.git', :tag => '7.4.0'
-  
-  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
-end
 
 def flutter_root
   generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
@@ -41,7 +31,11 @@ target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
+  # Workaround for Google Maps (remove this line if it causes issues)
+  # pod 'GoogleMaps', :git => 'https://github.com/googlemaps/ios-maps-sdk.git', :tag => '7.4.0'
+  
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+  
   target 'RunnerTests' do
     inherit! :search_paths
   end
@@ -50,5 +44,16 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+    
+    # Additional build settings to fix the -G flag issue
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
+      config.build_settings['ENABLE_BITCODE'] = 'NO'
+      
+      # Remove problematic flags
+      config.build_settings['OTHER_CFLAGS'] = ['$(inherited)']
+      config.build_settings['OTHER_CPLUSPLUSFLAGS'] = ['$(inherited)']
+      config.build_settings['OTHER_LDFLAGS'] = ['$(inherited)']
+    end
   end
 end
