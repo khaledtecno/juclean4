@@ -10,6 +10,16 @@ project 'Runner', {
   'Release' => :release,
 }
 
+target 'Runner' do
+  use_frameworks!
+  use_modular_headers!
+
+  # Workaround for Google Maps
+  pod 'GoogleMaps', :git => 'https://github.com/googlemaps/ios-maps-sdk.git', :tag => '7.4.0'
+  
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+end
+
 def flutter_root
   generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
   unless File.exist?(generated_xcode_build_settings_path)
