@@ -8,6 +8,9 @@ project 'Runner', {
   'Release' => :release,
 }
 
+# Enforce consistent Firebase version for all Firebase pods
+$FirebaseSDKVersion = '10.18.0'
+
 def flutter_root
   generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
   unless File.exist?(generated_xcode_build_settings_path)
@@ -29,9 +32,6 @@ target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
-  # Add this for Firebase stability
-  $FirebaseSDKVersion = '10.15.0'
-
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
   
   target 'RunnerTests' do
@@ -52,7 +52,6 @@ post_install do |installer|
       config.build_settings['OTHER_CPLUSPLUSFLAGS'] = ['$(inherited)']
       config.build_settings['OTHER_LDFLAGS'] = ['$(inherited)']
       
-      # Specifically remove -G flag from all compiler settings
       config.build_settings['GCC_OPTIMIZATION_LEVEL'] = '0'
       config.build_settings['GCC_DEBUG_INFORMATION_FORMAT'] = 'dwarf'
     end
