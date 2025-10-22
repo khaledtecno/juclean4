@@ -1,6 +1,5 @@
 platform :ios, '12.0'
 
-# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
 project 'Runner', {
@@ -30,6 +29,9 @@ target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
+  # Add this for Firebase stability
+  $FirebaseSDKVersion = '10.15.0'
+
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
   
   target 'RunnerTests' do
@@ -53,19 +55,6 @@ post_install do |installer|
       # Specifically remove -G flag from all compiler settings
       config.build_settings['GCC_OPTIMIZATION_LEVEL'] = '0'
       config.build_settings['GCC_DEBUG_INFORMATION_FORMAT'] = 'dwarf'
-      
-      # Remove -G from any string settings
-      config.build_settings.each do |key, value|
-        if value.is_a?(String)
-          config.build_settings[key] = value.gsub(/-G\S*/, '')
-        end
-      end
     end
-  end
-  
-  # Apply to project level settings too
-  installer.pods_project.build_configurations.each do |config|
-    config.build_settings['GCC_OPTIMIZATION_LEVEL'] = '0'
-    config.build_settings['GCC_DEBUG_INFORMATION_FORMAT'] = 'dwarf'
   end
 end
