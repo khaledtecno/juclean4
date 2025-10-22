@@ -1,4 +1,3 @@
-# Uncomment this line to define a global platform for your project
 platform :ios, '12.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
@@ -31,9 +30,6 @@ target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
-  # Workaround for Google Maps (remove this line if it causes issues)
-  # pod 'GoogleMaps', :git => 'https://github.com/googlemaps/ios-maps-sdk.git', :tag => '7.4.0'
-  
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
   
   target 'RunnerTests' do
@@ -45,7 +41,6 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
     
-    # Additional build settings to fix the -G flag issue
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
       config.build_settings['ENABLE_BITCODE'] = 'NO'
@@ -54,6 +49,23 @@ post_install do |installer|
       config.build_settings['OTHER_CFLAGS'] = ['$(inherited)']
       config.build_settings['OTHER_CPLUSPLUSFLAGS'] = ['$(inherited)']
       config.build_settings['OTHER_LDFLAGS'] = ['$(inherited)']
+      
+      # Specifically remove -G flag from all compiler settings
+      config.build_settings['GCC_OPTIMIZATION_LEVEL'] = '0'
+      config.build_settings['GCC_DEBUG_INFORMATION_FORMAT'] = 'dwarf'
+      
+      # Remove -G from any string settings
+      config.build_settings.each do |key, value|
+        if value.is_a?(String)
+          config.build_settings[key] = value.gsub(/-G\S*/, '')
+        end
+      end
     end
+  end
+  
+  # Apply to project level settings too
+  installer.pods_project.build_configurations.each do |config|
+    config.build_settings['GCC_OPTIMIZATION_LEVEL'] = '0'
+    config.build_settings['GCC_DEBUG_INFORMATION_FORMAT'] = 'dwarf'
   end
 end
